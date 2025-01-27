@@ -1,6 +1,8 @@
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
+
+from moto.utilities.paginator import paginate
 
 from moto.core.base_backend import BackendDict, BaseBackend
 from moto.core.common_models import BaseModel
@@ -16,6 +18,15 @@ from moto.utilities.utils import PARTITION_NAMES, get_partition
 from .exceptions import AccessPointNotFound, AccessPointPolicyNotFound
 from .jobs import JobsController, Job
 
+
+PAGINATION_MODEL = {
+    "list_jobs": {
+        "input_token": "next_token",
+        "limit_key": "max_results",
+        "limit_default": 123,
+        "unique_attribute": "job_id",
+    },
+}
 
 class AccessPoint(BaseModel):
     def __init__(
@@ -118,6 +129,10 @@ class S3ControlBackend(BaseBackend):
 
     def get_job(self, job_id: str) -> Job:
         return self.job_controller.get_job(job_id)
+
+    @paginate(pagination_model=PAGINATION_MODEL)
+    def list_jobs(self, job_statuses_filter: List[str]) -> List[Job]:
+        return self.job_controller.list_jobs(job_statuses_filter)
 
     def delete_access_point(self, account_id: str, name: str) -> None:
         self.access_points[account_id].pop(name, None)
