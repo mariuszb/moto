@@ -85,11 +85,12 @@ class S3ControlResponse(BaseResponse):
         operation_template = self.response_template(
             GET_JOB_INITIATE_S3_RESTORE_TEMPLATE
         )
+        operation_definition = job.definition.operation_definition[
+            "S3InitiateRestoreObject"
+        ]
         operation = operation_template.render(
-            expiration_in_days=job.definition.operation_definition.get(
-                "ExpirationInDays"
-            ),
-            glacier_job_tier=job.definition.operation_definition.get("GlacierJobTier"),
+            expiration_in_days=operation_definition.get("ExpirationInDays"),
+            glacier_job_tier=operation_definition.get("GlacierJobTier"),
         )
 
         template = self.response_template(GET_JOB_TEMPLATE)
@@ -131,10 +132,10 @@ class S3ControlResponse(BaseResponse):
                 "job_id": job.job_id,
                 "operation": job.definition.operation_name,
                 "priority": 10,
-                "number_of_tasks_failed": 123,
-                "number_of_tasks_succeeded": 456,
+                "number_of_tasks_failed": job.number_of_tasks_failed,
+                "number_of_tasks_succeeded": job.number_of_tasks_succeeded,
                 "elapsed_time_in_active_seconds": 789,
-                "total_number_of_tasks": 135,
+                "total_number_of_tasks": job.total_number_of_tasks,
                 "status": job.status,
                 "termination_date": (
                     job.finish_time.timestamp() if job.finish_time else None

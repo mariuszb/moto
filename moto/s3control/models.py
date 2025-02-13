@@ -28,6 +28,7 @@ PAGINATION_MODEL = {
     },
 }
 
+
 class AccessPoint(BaseModel):
     def __init__(
         self,

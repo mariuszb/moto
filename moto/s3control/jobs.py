@@ -351,7 +351,7 @@ class RestoreObjectJob(JobExecutor):
                     failed.append(bucket_and_key)
         except Exception as exc:
             log(f"Exception in job {self.job.job_id}: {exc}\n")
-            log(f"Stacktrace: {traceback.format_exc() }\n")
+            log(f"Stacktrace: {traceback.format_exc()}\n")
         finally:
             self.job.finish_time = datetime.datetime.now()
 
@@ -407,7 +407,8 @@ class JobsController:
                     job_id: job
                     for job_id, job in self._jobs.items()
                     if not job.finish_time
-                    or now - job.finish_time < datetime.timedelta(minutes=JOBS_RETENTION_TIME_IN_MINUTES)
+                    or now - job.finish_time
+                    < datetime.timedelta(minutes=JOBS_RETENTION_TIME_IN_MINUTES)
                 }
                 post_jobs_count = len(self._jobs)
             if pre_jobs_count != post_jobs_count:
