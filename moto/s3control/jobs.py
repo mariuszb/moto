@@ -396,23 +396,26 @@ class JobsController:
 
     def do_cleanup(self):
         while not self._stop_requested:
-            with self._jobs_lock:
-                jobs = copy(self._jobs)
-            for job in jobs.values():
-                job.try_cleanup()
-            with self._jobs_lock:
-                now = datetime.datetime.now()
-                pre_jobs_count = len(self._jobs)
-                self._jobs = {
-                    job_id: job
-                    for job_id, job in self._jobs.items()
-                    if not job.finish_time
-                    or now - job.finish_time
-                    < datetime.timedelta(minutes=JOBS_RETENTION_TIME_IN_MINUTES)
-                }
-                post_jobs_count = len(self._jobs)
-            if pre_jobs_count != post_jobs_count:
-                log(f"do_cleanup: jobs {pre_jobs_count} -> {post_jobs_count}")
+            try:
+                with self._jobs_lock:
+                    jobs = copy(self._jobs)
+                for job in jobs.values():
+                    job.try_cleanup()
+                with self._jobs_lock:
+                    now = datetime.datetime.now()
+                    pre_jobs_count = len(self._jobs)
+                    self._jobs = {
+                        job_id: job
+                        for job_id, job in self._jobs.items()
+                        if not job.finish_time
+                        or now - job.finish_time
+                        < datetime.timedelta(minutes=JOBS_RETENTION_TIME_IN_MINUTES)
+                    }
+                    post_jobs_count = len(self._jobs)
+                if pre_jobs_count != post_jobs_count:
+                    log(f"do_cleanup: jobs {pre_jobs_count} -> {post_jobs_count}")
+            except Exception as exc:
+                log(f"do_cleanup: failed with {exc}")
             time.sleep(1)
 
     def list_jobs(self, job_statuses_filter):
