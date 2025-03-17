@@ -381,8 +381,9 @@ class RestoreObjectJob(JobExecutor):
         if not key.startswith("fail_with_"):
             return None
         # It is string like AccessDenied but for some reason Amazon call it http status code,
-        # this code just keeps their naming
-        http_status_code = key.removeprefix("fail_with_")
+        # this code just keeps their naming.
+        # Example file name: fail_with_AccessDenied_123 - the code takes AccessDenied from the file name
+        http_status_code = key.removeprefix("fail_with_").split("_")[0]
         error_code = 400
         result_message = "Unknown error occurred"
         match http_status_code:
