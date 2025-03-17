@@ -1,12 +1,17 @@
+import binascii
 import csv
+import dataclasses
 import datetime
 import io
+import json
+import secrets
 import time
 import traceback
 import uuid
 from copy import copy
 from enum import Enum
 from functools import cached_property
+from hashlib import md5
 from threading import Lock, Thread
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -255,6 +260,15 @@ class Job(BaseModel, ManagedState):
         )
 
 
+@dataclasses.dataclass(slots=True)
+class RestoreError:
+    bucket: str
+    key: str
+    error_code: int
+    http_status_code: str
+    result_message: str
+
+
 class RestoreObjectJob(JobExecutor):
     OPERATION = "S3InitiateRestoreObject"
 
@@ -267,12 +281,16 @@ class RestoreObjectJob(JobExecutor):
                 raise ValidationError("ExpirationInDays")
         return 1
 
+    @property
+    def s3_backend(self):
+        return s3_backends[self.definition.account_id][self.definition.partition]
+
     def run(self):
         succeeded = []
-        failed = []
+        errors = []
         try:
             self.job.status = JobStatus.PREPARING.value
-            backend = s3_backends[self.definition.account_id][self.definition.partition]
+            backend = self.s3_backend
 
             manifest_file_obj = None
             try:
@@ -316,18 +334,24 @@ class RestoreObjectJob(JobExecutor):
 
             for bucket, key in buckets_and_keys:
                 self.job.total_number_of_tasks += 1
-                try:
-                    key_obj = backend.get_object(bucket, key)
-                except MissingBucket:
-                    continue
-                if key_obj is not None:
-                    key_obj.status = "IN_PROGRESS"
-                    key_obj.set_expiry(expiration)
-                    self.job.number_of_tasks_succeeded += 1
+                # this is just to simulate some errors based on key name
+                key_error = self.error_for_key(bucket, key)
+                if key_error:
+                    errors.append(key_error)
+                else:
+                    try:
+                        key_obj = backend.get_object(bucket, key)
+                    except MissingBucket:
+                        continue
+                    if key_obj is not None:
+                        key_obj.status = "IN_PROGRESS"
+                        key_obj.set_expiry(expiration)
+                        self.job.number_of_tasks_succeeded += 1
 
             self.job.number_of_tasks_failed = (
                 self.job.total_number_of_tasks - self.job.number_of_tasks_succeeded
             )
+            self.create_report_file(errors)
             self.job.status = JobStatus.COMPLETE.value
 
             sleep_time = datetime.datetime.now() + datetime.timedelta(
@@ -342,18 +366,105 @@ class RestoreObjectJob(JobExecutor):
                 try:
                     key_obj = backend.get_object(*bucket_and_key)
                 except MissingBucket:
-                    failed.append(bucket_and_key)
                     continue
                 if key_obj is not None:
                     key_obj.restore(self._expiration_days)
                     succeeded.append(bucket_and_key)
-                else:
-                    failed.append(bucket_and_key)
         except Exception as exc:
             log(f"Exception in job {self.job.job_id}: {exc}\n")
             log(f"Stacktrace: {traceback.format_exc()}\n")
         finally:
             self.job.finish_time = datetime.datetime.now()
+
+    @staticmethod
+    def error_for_key(bucket, key):
+        if not key.startswith("fail_with_"):
+            return None
+        # It is string like AccessDenied but for some reason Amazon call it http status code,
+        # this code just keeps their naming
+        http_status_code = key.removeprefix("fail_with_")
+        error_code = 400
+        result_message = "Unknown error occurred"
+        match http_status_code:
+            case "AccessDenied":
+                error_code = 403
+                result_message = (
+                    "User: arn:aws:sts::012345678910:assumed-role/s3batch-role/s3-batch-operations_some-id "
+                    f'is not authorized to perform: s3:ListBucket on resource: "arn:aws:s3:::{bucket}" '
+                    "because no identity-based policy allows the s3:ListBucket action"
+                )
+            case "InvalidObjectState":
+                error_code = 403
+                result_message = (
+                    "Restore is not allowed for the object's current storage class"
+                )
+            case "RestoreAlreadyInProgress":
+                error_code = 409
+                result_message = "Object restore is already in progress"
+        result_message_suffix = (
+            f" (Service: Amazon S3; Status Code: {error_code}; Error Code: {http_status_code}; "
+            "Request ID: some-id; S3 Extended Request ID: some-id; Proxy: null)"
+        )
+        result_message += result_message_suffix
+        return RestoreError(bucket, key, error_code, http_status_code, result_message)
+
+    def create_report_file(self, errors):
+        if not self.definition.report_enabled:
+            return
+
+        report_prefix = f"{self.definition.report_prefix}/job-{self.job.job_id}"
+        report_bucket = self.definition.report_bucket.removeprefix("arn:aws:s3:::")
+        manifest_dict = {
+            "Format": "Report_CSV_20180820",
+            "ReportCreationDate": datetime.datetime.now(datetime.UTC).strftime(
+                "%Y-%m-%dT%H:%M:%S:%fZ"
+            ),
+            "Results": [],
+            "ReportSchema": "Bucket, Key, VersionId, TaskStatus, ErrorCode, HTTPStatusCode, ResultMessage",
+        }
+        if errors:
+            hex_string = binascii.hexlify(secrets.token_bytes(20)).decode("utf-8")
+            result_key_name = f"{report_prefix}/results/{hex_string}.csv"
+            md5_checksum = self.create_failures_result_file(
+                report_bucket, result_key_name, errors
+            )
+            manifest_dict["Results"].append(
+                {
+                    "TaskExecutionStatus": "failed",
+                    "Bucket": report_bucket,
+                    "MD5Checksum": md5_checksum,
+                    "Key": result_key_name,
+                }
+            )
+
+        manifest_content = json.dumps(manifest_dict).encode("utf-8")
+        manifest_key_name = f"{report_prefix}/manifest.json"
+        self.s3_backend.put_object(report_bucket, manifest_key_name, manifest_content)
+        manifest_md5_key_name = f"{manifest_key_name}.md5"
+        manifest_md5_content = md5(manifest_content).hexdigest().encode("utf-8")
+        self.s3_backend.put_object(
+            report_bucket, manifest_md5_key_name, manifest_md5_content
+        )
+
+    def create_failures_result_file(self, bucket_name, key_name, errors):
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+        for error in errors:
+            writer.writerow(
+                [
+                    error.bucket,
+                    error.key,
+                    "",
+                    "failed",
+                    error.error_code,
+                    error.http_status_code,
+                    error.result_message,
+                ]
+            )
+        content = output.getvalue().encode("utf8")
+        md5_checksum = md5(content).hexdigest()
+        self.s3_backend.put_object(bucket_name, key_name, content)
+        return md5_checksum
 
 
 class JobsController:
