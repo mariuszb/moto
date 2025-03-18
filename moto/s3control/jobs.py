@@ -378,12 +378,14 @@ class RestoreObjectJob(JobExecutor):
 
     @staticmethod
     def error_for_key(bucket, key):
-        if not key.startswith("fail_with_"):
+        # let's take the "file name" of the key
+        key_last_part = key.split("/")[-1]
+        if not key_last_part.startswith("fail_with_"):
             return None
         # It is string like AccessDenied but for some reason Amazon call it http status code,
         # this code just keeps their naming.
         # Example file name: fail_with_AccessDenied_123 - the code takes AccessDenied from the file name
-        http_status_code = key.removeprefix("fail_with_").split("_")[0]
+        http_status_code = key_last_part.removeprefix("fail_with_").split("_")[0]
         error_code = 400
         result_message = "Unknown error occurred"
         match http_status_code:
