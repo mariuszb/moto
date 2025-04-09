@@ -314,12 +314,10 @@ class RestoreObjectJob(JobExecutor):
                     self.job.status = JobStatus.FAILED.value
                     return
 
-            if manifest_file_obj is None:
+            reason_code, reason_message = self.validate_manifest(manifest_file_obj)
+            if reason_code:
                 self.job.failure_reasons.append(
-                    {
-                        "code": "ManifestNotFound",
-                        "reason": "Manifest object was not found",
-                    }
+                    {"code": reason_code, "reason": reason_message}
                 )
                 self.job.status = JobStatus.FAILED.value
                 return
@@ -375,6 +373,24 @@ class RestoreObjectJob(JobExecutor):
             log(f"Stacktrace: {traceback.format_exc()}\n")
         finally:
             self.job.finish_time = datetime.datetime.now()
+
+    def validate_manifest(self, manifest_file_obj):
+        if manifest_file_obj is None:
+            return "ManifestNotFound", "Manifest object was not found"
+
+        if manifest_file_obj.etag != f'"{self.definition.manifest_etag}"':
+            return "ManifestNotFound", "Etag mismatch reading manifest"
+
+        if (
+            manifest_file_obj.encryption is not None
+            and manifest_file_obj.encryption != "AES256"
+        ):
+            return (
+                "InvalidManifestContent",
+                "Unsupported encryption type SSE_KMS used for manifest",
+            )
+
+        return None, None
 
     @staticmethod
     def error_for_key(bucket, key):
