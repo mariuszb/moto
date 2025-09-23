@@ -207,15 +207,20 @@ class JobExecutor(Thread):
 
     @cached_property
     def _version_index_in_csv(self):
-        return self.definition.manifest_fields.index("VersionId")
+        try:
+            index = self.definition.manifest_fields.index("VersionId")
+        except ValueError:
+            index = None
+        return index
 
     def _manifest_fields_from_csv(self, file_obj):
         stream = io.StringIO(file_obj.value.decode(encoding="utf-8"))
+        version_id_index = self._version_index_in_csv
         for row in csv.reader(stream):
             yield (
                 row[self._bucket_index_in_csv],
                 row[self._key_index_in_csv],
-                row[self._version_index_in_csv],
+                row[version_id_index] if version_id_index is not None else None,
             )
 
 
