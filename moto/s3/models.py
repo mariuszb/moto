@@ -3056,9 +3056,14 @@ class S3Backend(BaseBackend, CloudWatchMetricProvider):
             ], bytes_scanned
 
     def restore_object(
-        self, bucket_name: str, key_name: str, days: Optional[str], type_: Optional[str]
+        self,
+        bucket_name: str,
+        key_name: str,
+        days: Optional[str],
+        type_: Optional[str],
+        version_id: Optional[str] = None,
     ) -> bool:
-        key = self.get_object(bucket_name, key_name)
+        key = self.get_object(bucket_name, key_name, version_id)
         if not key:
             raise MissingKey
 

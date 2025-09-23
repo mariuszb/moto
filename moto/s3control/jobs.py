@@ -205,10 +205,23 @@ class JobExecutor(Thread):
     def _key_index_in_csv(self):
         return self.definition.manifest_fields.index("Key")
 
-    def _buckets_and_keys_from_csv(self, file_obj):
+    @cached_property
+    def _version_index_in_csv(self):
+        try:
+            index = self.definition.manifest_fields.index("VersionId")
+        except ValueError:
+            index = None
+        return index
+
+    def _manifest_fields_from_csv(self, file_obj):
         stream = io.StringIO(file_obj.value.decode(encoding="utf-8"))
+        version_id_index = self._version_index_in_csv
         for row in csv.reader(stream):
-            yield row[self._bucket_index_in_csv], row[self._key_index_in_csv]
+            yield (
+                row[self._bucket_index_in_csv],
+                row[self._key_index_in_csv],
+                row[version_id_index] if version_id_index is not None else None,
+            )
 
 
 class Job(BaseModel, ManagedState):
@@ -328,9 +341,9 @@ class RestoreObjectJob(JobExecutor):
                 self._expiration_days, restoration_delay_in_seconds
             )
 
-            buckets_and_keys = list(self._buckets_and_keys_from_csv(manifest_file_obj))
+            manifest_fields = list(self._manifest_fields_from_csv(manifest_file_obj))
 
-            for bucket, key in buckets_and_keys:
+            for bucket, key, version_id in manifest_fields:
                 self.job.total_number_of_tasks += 1
                 # this is just to simulate some errors based on key name
                 key_error = self.error_for_key(bucket, key)
@@ -338,7 +351,7 @@ class RestoreObjectJob(JobExecutor):
                     errors.append(key_error)
                 else:
                     try:
-                        key_obj = backend.get_object(bucket, key)
+                        key_obj = backend.get_object(bucket, key, version_id=version_id)
                     except MissingBucket:
                         continue
                     if key_obj is not None:
@@ -360,14 +373,14 @@ class RestoreObjectJob(JobExecutor):
                 if self.stop_requested:
                     return
 
-            for bucket_and_key in buckets_and_keys:
+            for mf in manifest_fields:
                 try:
-                    key_obj = backend.get_object(*bucket_and_key)
+                    key_obj = backend.get_object(*mf)
                 except MissingBucket:
                     continue
                 if key_obj is not None:
                     key_obj.restore(self._expiration_days)
-                    succeeded.append(bucket_and_key)
+                    succeeded.append(mf)
         except Exception as exc:
             log(f"Exception in job {self.job.job_id}: {exc}\n")
             log(f"Stacktrace: {traceback.format_exc()}\n")
