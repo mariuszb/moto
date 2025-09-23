@@ -1464,9 +1464,7 @@ class S3Response(BaseResponse):
             return self._key_response_post(request, body, bucket_name, query, key_name)
         elif method == "OPTIONS":
             # OPTIONS response doesn't depend on the key_name: always return 200 with CORS headers
-            return self._response_options(
-                reqpreviously_restoreduest.headers, bucket_name
-            )
+            return self._response_options(request.headers, bucket_name)
         else:
             raise NotImplementedError(
                 f"Method {method} has not been implemented in the S3 backend yet"
