@@ -2309,7 +2309,6 @@ class S3Backend(BaseBackend, CloudWatchMetricProvider):
                         if key_version.version_id == "null":
                             key = key_version
                             break
-                    # key = bucket.keys[key_name]
             else:
                 for key_version in bucket.keys.getlist(key_name, default=[]):
                     if str(key_version.version_id) == str(version_id):
