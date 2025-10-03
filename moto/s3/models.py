@@ -2197,9 +2197,7 @@ class S3Backend(BaseBackend, CloudWatchMetricProvider):
         if bucket.is_versioned:
             keys = existing_keys + [new_key]
         else:
-            keys = [key for key in existing_keys if key.version_id != "null"] + [
-                new_key
-            ]
+            keys = [new_key]
         bucket.keys.setlist(key_name, keys)
 
         if not disable_notification:
@@ -2305,10 +2303,7 @@ class S3Backend(BaseBackend, CloudWatchMetricProvider):
         if bucket:
             if version_id is None:
                 if key_name in bucket.keys:
-                    for key_version in bucket.keys.getlist(key_name, default=[]):
-                        if key_version.version_id == "null":
-                            key = key_version
-                            break
+                    key = bucket.keys[key_name]
             else:
                 for key_version in bucket.keys.getlist(key_name, default=[]):
                     if str(key_version.version_id) == str(version_id):
