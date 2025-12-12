@@ -20,12 +20,14 @@ from moto.moto_api._internal.managed_state_model import ManagedState
 from moto.s3.exceptions import MissingBucket
 from moto.s3.models import s3_backends
 
+from ..s3.exceptions import InvalidRequest, S3AccessDeniedError
+from ..utilities.arns import parse_arn
 from .exceptions import InvalidJobOperation, ValidationError
 
 restoration_delay_in_seconds = 60
 
 JOBS_RETENTION_TIME_IN_MINUTES = 15
-
+ASSUMED_BATCH_ROLE = "s3batch-role"
 
 def log(msg):
     dt = datetime.datetime.now()
@@ -101,6 +103,7 @@ class JobDefinition:
         report_format: str | None,
         report_prefix: str | None,
         report_scope: str | None,
+        batch_role_arn: str | None,
     ):
         self.account_id = account_id
         self.description = description
@@ -117,6 +120,8 @@ class JobDefinition:
         self.report_format = report_format
         self.report_prefix = report_prefix
         self.report_scope = report_scope
+        self.batch_role_arn = batch_role_arn
+        self._validate_definition()
 
     @classmethod
     def from_dict(
@@ -142,6 +147,7 @@ class JobDefinition:
         report_prefix = report.get("Prefix")
         report_scope = report.get("ReportScope")
         operation_definition = params["Operation"]
+        batch_role_arn = params["RoleArn"]
         if report_enabled is not None:
             report_enabled = report_enabled.lower() == "true"
         return JobDefinition(
@@ -160,7 +166,23 @@ class JobDefinition:
             report_format=report_format,
             report_prefix=report_prefix,
             report_scope=report_scope,
+            batch_role_arn=batch_role_arn,
         )
+
+    def _validate_definition(self):
+        def _validate_arn(arn: str, account_id: str):
+            try:
+                parsed = parse_arn(arn)
+            except ValueError:
+                raise InvalidRequest("Invalid role arn")
+            if parsed.partition != "aws":
+                raise InvalidRequest("Invalid S3 object ARN provided")
+            if parsed.account and parsed.account != account_id:
+                raise S3AccessDeniedError()
+
+        _validate_arn(self.manifest_arn, self.account_id)
+        _validate_arn(self.report_bucket, self.account_id)
+        _validate_arn(self.batch_role_arn, self.account_id)
 
     @property
     def manifest_bucket_name(self):
@@ -331,6 +353,19 @@ class RestoreObjectJob(JobExecutor):
             if reason_code:
                 self.job.failure_reasons.append(
                     {"code": reason_code, "reason": reason_message}
+                )
+                self.job.status = JobStatus.FAILED.value
+                return
+
+            batch_role_arn = parse_arn(self.job.definition.batch_role_arn)
+            if batch_role_arn.resource_id != ASSUMED_BATCH_ROLE:
+                self.job.failure_reasons.append(
+                    {
+                        "code": "AccessDenied",
+                        "reason": f"Could not assume the IAM role: {self.job.definition.batch_role_arn}, "
+                                  "Please ensure that a trust policy is attached to the role that allows "
+                                  "batchoperations.s3.amazonaws.com to assume the role",
+                    }
                 )
                 self.job.status = JobStatus.FAILED.value
                 return

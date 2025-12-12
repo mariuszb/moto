@@ -1,8 +1,6 @@
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, Optional, List
-
-from moto.utilities.paginator import paginate
+from typing import Any, Dict, List, Optional
 
 from moto.core.base_backend import BackendDict, BaseBackend
 from moto.core.common_models import BaseModel
@@ -13,11 +11,11 @@ from moto.s3.exceptions import (
     WrongPublicAccessBlockAccountIdError,
 )
 from moto.s3.models import PublicAccessBlock
+from moto.utilities.paginator import paginate
 from moto.utilities.utils import PARTITION_NAMES, get_partition
 
 from .exceptions import AccessPointNotFound, AccessPointPolicyNotFound
-from .jobs import JobsController, Job
-
+from .jobs import Job, JobsController
 
 PAGINATION_MODEL = {
     "list_jobs": {
