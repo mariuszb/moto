@@ -176,7 +176,10 @@ class JobDefinition:
             except ValueError:
                 raise InvalidRequest("Invalid role arn")
             if parsed.partition != "aws":
-                raise InvalidRequest("Invalid S3 object ARN provided")
+                if parsed.partition in ["aws-cn", "aws-us-gov"]:
+                    raise InvalidRequest("Invalid role arn")
+                else:
+                    raise InvalidRequest("Invalid S3 object ARN provided")
             if parsed.account and parsed.account != account_id:
                 raise S3AccessDeniedError()
 
