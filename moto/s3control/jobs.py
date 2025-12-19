@@ -175,11 +175,8 @@ class JobDefinition:
                 parsed = parse_arn(arn)
             except ValueError:
                 raise InvalidRequest("Invalid role arn")
-            if parsed.partition != "aws":
-                if parsed.partition in ["aws-cn", "aws-us-gov"]:
-                    raise InvalidRequest("Invalid role arn")
-                else:
-                    raise InvalidRequest("Invalid S3 object ARN provided")
+            if parsed.partition != self.partition:
+                raise S3AccessDeniedError()
             if parsed.account and parsed.account != account_id:
                 raise S3AccessDeniedError()
 
@@ -483,7 +480,7 @@ class RestoreObjectJob(JobExecutor):
             return
 
         report_prefix = f"{self.definition.report_prefix}/job-{self.job.job_id}"
-        report_bucket = self.definition.report_bucket.removeprefix("arn:aws:s3:::")
+        report_bucket = self.definition.report_bucket.removeprefix(f"arn:{self.definition.partition}:s3:::")
         manifest_dict = {
             "Format": "Report_CSV_20180820",
             "ReportCreationDate": datetime.datetime.now(datetime.UTC).strftime(
